@@ -4,9 +4,10 @@ import type { MovementPart } from '../types/part';
 import type { RepairStep } from '../types/step';
 import type { TimekeepingTest } from '../types/test';
 import { newId } from './id';
+import { normalizeSteps } from './repair';
 
 export const DB_NAME = 'gbclockrepair';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 export const LS_VERSION_KEY = 'gbclockrepair:db-version';
 
 class ClockRepairDB extends Dexie {
@@ -47,6 +48,29 @@ class ClockRepairDB extends Dexie {
           .modify((row: any) => {
             if (row.positions === undefined) row.positions = [];
           });
+      });
+    // v3：工序必须按顺序推进——回退一步时该步及其后已完成记录一并待重做，并记录每步重做次数。
+    // 不新增索引（redoCount 不需要查询索引），只做数据归一化，让 v2 及更早的老数据继续可用。
+    this.version(3)
+      .stores({
+        clocks: 'id, clockNo, kind, caliber, conditionGrade, createdAt',
+        parts: 'id, clockId, name, wearState, decision, sourceLot',
+        steps: 'id, clockId, seq, stepType, state, startedAt',
+        tests: 'id, clockId, testedAt, conclusion',
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table('steps');
+        const rows = (await table.toArray()) as Array<Partial<RepairStep>>;
+        // 归一化必须按钟表分组：顺序约束只在同一台钟表内生效
+        const byClock = new Map<string, Array<Partial<RepairStep>>>();
+        for (const row of rows) {
+          const list = byClock.get(row.clockId ?? '') ?? [];
+          list.push(row);
+          byClock.set(row.clockId ?? '', list);
+        }
+        const fixed: RepairStep[] = [];
+        for (const list of byClock.values()) fixed.push(...normalizeSteps(list));
+        await table.bulkPut(fixed);
       });
   }
 }
@@ -176,6 +200,7 @@ export async function ensureSeedData(): Promise<void> {
       startedAt: now - 12 * day,
       finishedAt: now - 12 * day + 80 * 60000,
       state: 'done',
+      redoCount: 0,
     },
     {
       id: newId('stp'),
@@ -193,6 +218,7 @@ export async function ensureSeedData(): Promise<void> {
       startedAt: now - 8 * day,
       finishedAt: now - 8 * day + 45 * 60000,
       state: 'done',
+      redoCount: 0,
     },
     {
       id: newId('stp'),
@@ -209,6 +235,7 @@ export async function ensureSeedData(): Promise<void> {
       operator: '祁仲言',
       startedAt: now - 3 * day,
       state: 'pending',
+      redoCount: 0,
     },
   ];
 

@@ -3,7 +3,12 @@ export type StepType = '拆解' | '清洗' | '润滑' | '装配' | '调试' | '�
 
 export const STEP_TYPES: StepType[] = ['拆解', '清洗', '润滑', '装配', '调试', '走时测试'];
 
-/** 步骤状态 */
+/**
+ * 步骤状态
+ * - pending：尚未做过的待办
+ * - done：已完成
+ * - rolledback：已回退、待重做（回退某步时，该步及其后已完成步骤一并进入此态）
+ */
 export type StepState = 'pending' | 'done' | 'rolledback';
 
 /** 各步骤类型的动态字段开关 */
@@ -43,6 +48,8 @@ export interface RepairStep {
   startedAt: number;
   finishedAt?: number;
   state: StepState;
+  /** 重做次数：每被回退一次加 1（含级联回退、老数据归一化） */
+  redoCount: number;
 }
 
 export type RepairStepDraft = Omit<RepairStep, 'id'>;

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useClockStore } from '../stores/clockStore';
 import { usePartStore } from '../stores/partStore';
-import { useStepStore } from '../stores/stepStore';
+import { useStepStore, StepRuleError } from '../stores/stepStore';
 import { useRepairProgress } from '../hooks/useRepairProgress';
 import StepSequence from '../components/common/StepSequence.vue';
 import { STEP_FIELD_MAP, STEP_TYPES, type RepairStepDraft, type StepType } from '../types/step';
@@ -34,6 +34,7 @@ const form = reactive<RepairStepDraft>({
   operator: '',
   startedAt: Date.now(),
   state: 'pending',
+  redoCount: 0,
 });
 
 const error = ref('');
@@ -83,12 +84,37 @@ async function submit() {
 }
 
 async function finish(id: string) {
-  await stepStore.finish(id);
-  ElMessage.success('步骤已完成');
+  try {
+    await stepStore.finish(id);
+    ElMessage.success('步骤已完成');
+  } catch (err) {
+    if (err instanceof StepRuleError) ElMessage.error(err.message);
+    else throw err;
+  }
 }
 async function rollback(id: string) {
-  await stepStore.rollback(id);
-  ElMessage.warning('步骤已回退');
+  const step = steps.value.find((it) => it.id === id);
+  const followCount = step ? steps.value.filter((it) => it.seq > step.seq && it.state === 'done').length : 0;
+  const tip =
+    followCount > 0
+      ? `回退后，#${step?.seq} 及其后 ${followCount} 道已完成工序将一并回到待重做，并各记 1 次重做。是否继续？`
+      : `回退后 #${step?.seq} 将回到待重做，并记 1 次重做。是否继续？`;
+  try {
+    await ElMessageBox.confirm(tip, '回退确认', {
+      type: 'warning',
+      confirmButtonText: '回退并待重做',
+      cancelButtonText: '取消',
+    });
+  } catch {
+    return;
+  }
+  try {
+    const affected = await stepStore.rollback(id);
+    ElMessage.warning(`已回退 ${affected} 道工序，请按顺序重做`);
+  } catch (err) {
+    if (err instanceof StepRuleError) ElMessage.error(err.message);
+    else throw err;
+  }
 }
 
 onMounted(async () => {

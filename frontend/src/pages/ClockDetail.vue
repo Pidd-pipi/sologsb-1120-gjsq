@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useClockStore } from '../stores/clockStore';
 import { usePartStore } from '../stores/partStore';
-import { useStepStore } from '../stores/stepStore';
+import { useStepStore, StepRuleError } from '../stores/stepStore';
 import { useRepairProgress } from '../hooks/useRepairProgress';
 import StepSequence from '../components/common/StepSequence.vue';
 import RateChart from '../components/common/RateChart.vue';
@@ -20,30 +20,65 @@ const stepStore = useStepStore();
 
 const clockId = computed(() => String(route.params.id ?? ''));
 const clock = computed(() => clockStore.byId(clockId.value));
-const { progress, steps, done, total, percent, current, gaps } = useRepairProgress(clockId);
+const { progress, steps, done, total, percent, current, gaps, redoTotal } = useRepairProgress(clockId);
 const parts = computed(() => partStore.byClock(clockId.value));
 const tests = computed(() => stepStore.testsByClock(clockId.value));
 const activeTab = ref('steps');
 
 async function finish(id: string) {
-  await stepStore.finish(id);
-  ElMessage.success('步骤已完成');
+  try {
+    await stepStore.finish(id);
+    ElMessage.success('步骤已完成');
+  } catch (err) {
+    if (err instanceof StepRuleError) ElMessage.error(err.message);
+    else throw err;
+  }
 }
 async function rollback(id: string) {
-  await stepStore.rollback(id);
-  ElMessage.warning('步骤已回退');
+  const step = steps.value.find((it) => it.id === id);
+  const followCount = step ? steps.value.filter((it) => it.seq > step.seq && it.state === 'done').length : 0;
+  const tip =
+    followCount > 0
+      ? `回退后，#${step?.seq} 及其后 ${followCount} 道已完成工序将一并回到待重做，并各记 1 次重做。是否继续？`
+      : `回退后 #${step?.seq} 将回到待重做，并记 1 次重做。是否继续？`;
+  try {
+    await ElMessageBox.confirm(tip, '回退确认', {
+      type: 'warning',
+      confirmButtonText: '回退并待重做',
+      cancelButtonText: '取消',
+    });
+  } catch {
+    return; // 用户取消
+  }
+  try {
+    const affected = await stepStore.rollback(id);
+    ElMessage.warning(`已回退 ${affected} 道工序，请按顺序重做`);
+  } catch (err) {
+    if (err instanceof StepRuleError) ElMessage.error(err.message);
+    else throw err;
+  }
 }
 async function move(payload: { id: string; direction: 'up' | 'down' }) {
   const list = steps.value;
   const index = list.findIndex((it) => it.id === payload.id);
   const target = payload.direction === 'up' ? list[index - 1] : list[index + 1];
   if (!target) return;
-  await stepStore.swapSeq(payload.id, target.id);
-  ElMessage.success('顺序已调整');
+  try {
+    await stepStore.swapSeq(payload.id, target.id);
+    ElMessage.success('顺序已调整');
+  } catch (err) {
+    if (err instanceof StepRuleError) ElMessage.error(err.message);
+    else throw err;
+  }
 }
 async function reorder(payload: { fromId: string; toId: string }) {
-  await stepStore.swapSeq(payload.fromId, payload.toId);
-  ElMessage.success('已按拖拽交换顺序');
+  try {
+    await stepStore.swapSeq(payload.fromId, payload.toId);
+    ElMessage.success('已按拖拽交换顺序');
+  } catch (err) {
+    if (err instanceof StepRuleError) ElMessage.error(err.message);
+    else throw err;
+  }
 }
 async function changeGrade(value: unknown) {
   const grade = String(value) as ConditionGrade;
@@ -103,8 +138,11 @@ onMounted(async () => {
             <div class="card-head">
               <strong>修复进度</strong>
               <el-tag size="small">{{ done }}/{{ total }} · {{ percent }}%</el-tag>
+              <el-tag v-if="redoTotal > 0" size="small" type="danger" effect="plain">
+                累计重做 {{ redoTotal }} 次
+              </el-tag>
               <span v-if="current" class="muted">
-                当前卡点：#{{ current.seq }} {{ current.stepType }}（{{ current.operator }}）
+                当前待办：#{{ current.seq }} {{ current.stepType }}（{{ current.operator }}）
               </span>
               <span v-else class="muted">全部步骤已完成</span>
             </div>

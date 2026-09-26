@@ -18,7 +18,7 @@ const type = computed(() => {
   if (props.tone) return props.tone;
   if (props.state) {
     if (props.state === 'done') return 'success';
-    if (props.state === 'rolledback') return 'danger';
+    if (props.state === 'rolledback') return 'warning';
     return 'info';
   }
   switch (props.grade) {
@@ -37,7 +37,7 @@ const text = computed(() => {
   if (props.label) return props.label;
   if (props.state) {
     if (props.state === 'done') return '已完成';
-    if (props.state === 'rolledback') return '已回退';
+    if (props.state === 'rolledback') return '待重做';
     return '待办';
   }
   return props.grade ?? '—';
