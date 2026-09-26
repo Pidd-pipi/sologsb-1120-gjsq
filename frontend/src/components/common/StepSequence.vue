@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import type { RepairStep } from '../../types/step';
 import { findSeqGaps } from '../../utils/id';
+import { currentTodo } from '../../utils/stepFlow';
 import StateBadge from './StateBadge.vue';
 
 const props = defineProps<{
@@ -21,6 +22,9 @@ const dragId = ref<string>('');
 
 const gaps = computed(() => findSeqGaps(props.items.map((it) => it.seq)));
 const conflict = computed(() => gaps.value.length > 0);
+
+/** 当前待办步骤：只有它允许点完成，保证工序按顺序推进 */
+const todoId = computed(() => currentTodo(props.items)?.id ?? '');
 
 function onDragStart(id: string) {
   dragId.value = id;
@@ -52,9 +56,12 @@ function onDrop(toId: string) {
       <el-table-column label="步骤" width="110">
         <template #default="{ row }">{{ row.stepType }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="100">
+      <el-table-column label="状态" width="130">
         <template #default="{ row }">
           <StateBadge :state="row.state" />
+          <el-tooltip v-if="row.redoCount > 0" content="该步骤被回退重做的累计次数" placement="top">
+            <el-tag size="small" type="warning" effect="plain" class="redo-tag">重做 ×{{ row.redoCount }}</el-tag>
+          </el-tooltip>
         </template>
       </el-table-column>
       <el-table-column label="清洗/润滑" min-width="200">
@@ -73,9 +80,14 @@ function onDrop(toId: string) {
       </el-table-column>
       <el-table-column label="操作" width="250">
         <template #default="{ row, $index }">
-          <el-button v-if="row.state !== 'done'" size="small" type="primary" @click="emit('finish', row.id)">
-            完成
-          </el-button>
+          <template v-if="row.state !== 'done'">
+            <el-button v-if="row.id === todoId" size="small" type="primary" @click="emit('finish', row.id)">
+              完成
+            </el-button>
+            <el-tooltip v-else content="工序须按顺序推进，请先完成当前待办步骤" placement="top">
+              <span><el-button size="small" type="primary" disabled>完成</el-button></span>
+            </el-tooltip>
+          </template>
           <el-button v-else size="small" type="warning" @click="emit('rollback', row.id)">回退</el-button>
           <template v-if="sortable">
             <el-button size="small" :disabled="$index === 0" @click="emit('move', { id: row.id, direction: 'up' })">
@@ -109,6 +121,9 @@ function onDrop(toId: string) {
 .gap {
   color: #d93025;
   font-weight: 700;
+}
+.redo-tag {
+  margin-left: 6px;
 }
 .drag-handle {
   margin-left: 8px;

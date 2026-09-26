@@ -8,6 +8,8 @@ export interface RepairProgress {
   total: number;
   done: number;
   rolledback: number;
+  /** 各步骤累计重做次数之和 */
+  redoTotal: number;
   percent: number;
   /** 当前卡点步骤 */
   current: RepairStep | undefined;
@@ -29,6 +31,7 @@ export function useRepairProgress(clockId: string | Ref<string>) {
   const total = computed(() => steps.value.length);
   const done = computed(() => steps.value.filter((it) => it.state === 'done').length);
   const rolledback = computed(() => steps.value.filter((it) => it.state === 'rolledback').length);
+  const redoTotal = computed(() => steps.value.reduce((sum, it) => sum + (it.redoCount ?? 0), 0));
   const percent = computed(() => (total.value === 0 ? 0 : Math.round((done.value / total.value) * 100)));
   const current = computed(() => steps.value.find((it) => it.state !== 'done'));
   const gaps = computed(() => findSeqGaps(steps.value.map((it) => it.seq)));
@@ -38,10 +41,11 @@ export function useRepairProgress(clockId: string | Ref<string>) {
     total: total.value,
     done: done.value,
     rolledback: rolledback.value,
+    redoTotal: redoTotal.value,
     percent: percent.value,
     current: current.value,
     gaps: gaps.value,
   }));
 
-  return { progress, steps, total, done, rolledback, percent, current, gaps };
+  return { progress, steps, total, done, rolledback, redoTotal, percent, current, gaps };
 }

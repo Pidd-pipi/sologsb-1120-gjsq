@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useClockStore } from '../stores/clockStore';
 import { usePartStore } from '../stores/partStore';
 import { useStepStore } from '../stores/stepStore';
 import { useRepairProgress } from '../hooks/useRepairProgress';
 import StepSequence from '../components/common/StepSequence.vue';
 import { STEP_FIELD_MAP, STEP_TYPES, type RepairStepDraft, type StepType } from '../types/step';
+import { cascadeRollbackIds } from '../utils/stepFlow';
 
 const route = useRoute();
 const router = useRouter();
@@ -34,6 +35,7 @@ const form = reactive<RepairStepDraft>({
   operator: '',
   startedAt: Date.now(),
   state: 'pending',
+  redoCount: 0,
 });
 
 const error = ref('');
@@ -83,12 +85,31 @@ async function submit() {
 }
 
 async function finish(id: string) {
-  await stepStore.finish(id);
-  ElMessage.success('步骤已完成');
+  try {
+    await stepStore.finish(id);
+    ElMessage.success('步骤已完成');
+  } catch (err) {
+    ElMessage.warning(err instanceof Error ? err.message : '无法完成该步骤');
+  }
 }
 async function rollback(id: string) {
-  await stepStore.rollback(id);
-  ElMessage.warning('步骤已回退');
+  const target = steps.value.find((it) => it.id === id);
+  const affected = cascadeRollbackIds(steps.value, id) ?? [];
+  if (!target || affected.length === 0) return;
+  const extra = affected.length - 1;
+  try {
+    await ElMessageBox.confirm(
+      extra > 0
+        ? `回退 #${target.seq} ${target.stepType} 后，其后续 ${extra} 条已完成记录将一并回到待重做（共 ${affected.length} 步，各记一次重做）。`
+        : `回退 #${target.seq} ${target.stepType}，该步骤将回到待重做并记一次重做。`,
+      '确认回退',
+      { confirmButtonText: '回退', cancelButtonText: '取消', type: 'warning' },
+    );
+  } catch {
+    return;
+  }
+  const count = await stepStore.rollback(id);
+  ElMessage.warning(`已回退 ${count} 步，回到待重做`);
 }
 
 onMounted(async () => {

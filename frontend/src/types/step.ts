@@ -43,6 +43,8 @@ export interface RepairStep {
   startedAt: number;
   finishedAt?: number;
   state: StepState;
+  /** 累计重做次数（每次被回退 +1，重新完成后不清零） */
+  redoCount: number;
 }
 
 export type RepairStepDraft = Omit<RepairStep, 'id'>;

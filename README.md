@@ -63,7 +63,7 @@ sologsb-1120/
         ├── components/common/{StepSequence,RateChart,ClockCard,StateBadge}.vue
         ├── hooks/{useClockSearch,useRepairProgress}.ts
         ├── pages/{ClockList,ClockDetail,StepForm,PartList,TestView}.vue
-        └── utils/{db,timeCalc,id}.ts
+        └── utils/{db,timeCalc,id,stepFlow}.ts
 ```
 
 ## 页面与路由
@@ -80,9 +80,10 @@ sologsb-1120/
 
 ## 数据存储说明
 
-- 数据库名 `gbclockrepair`，当前结构版本 **v2**（`localStorage['gbclockrepair:db-version']` 记录）。
+- 数据库名 `gbclockrepair`，当前结构版本 **v3**（`localStorage['gbclockrepair:db-version']` 记录）。
 - 四张表：`clocks`（钟表）、`parts`（机芯零件）、`steps`（维修工序）、`tests`（走时测试）。
 - v1 → v2 迁移：补齐老记录的 `state`、`partIds`、`torque`、`positions` 字段并新增索引。
+- v2 → v3 迁移：为工序补 `redoCount`（重做次数），已处于回退态的老记录记为 1，其余为 0。
 - 容器无状态、不挂载命名卷；清空站点数据即回到初始示范数据。
 - 首次打开灌入 2 台示范钟表、3 项零件、3 道工序与 1 次走时测试。
 
@@ -90,6 +91,7 @@ sologsb-1120/
 
 - **顺序号不跳号**：新建工序时若顺序号大于「当前最大顺序号 + 1」直接报错并给出建议值；`<StepSequence>` 对缺口行标红。
 - **工序排序**：支持「上移 / 下移」按钮与原生拖拽交换顺序，交换的是 `seq`。
-- **工序完成 / 回退**：完成后写 `finishedAt`，回退后计入待办与回退计数。
+- **按顺序推进**：同一时刻只有「当前待办」（按顺序第一个未完成步骤）可点完成，其余未完成步骤的完成按钮置灰，store 层同样拦截跳步完成。
+- **级联回退与重做计数**：回退任意已完成步骤时，该步与其后所有已完成记录一起回到「待重做」，每条记录 `redoCount +1`；重新做完后进度与台账的「待测试 / 已完成」状态自动恢复，重做次数保留。
 - **双轴走时图**：`<RateChart>` 左轴日差 s/d、右轴摆幅 °，标注四方位读数与均值。
 - **走时单导出**：按方位均值生成文本，可复制或下载 txt。

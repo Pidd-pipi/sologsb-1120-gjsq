@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useClockStore } from '../stores/clockStore';
 import { usePartStore } from '../stores/partStore';
 import { useStepStore } from '../stores/stepStore';
@@ -11,6 +11,7 @@ import RateChart from '../components/common/RateChart.vue';
 import StateBadge from '../components/common/StateBadge.vue';
 import { CONDITION_GRADES, type ConditionGrade } from '../types/clock';
 import { judgeTest } from '../types/test';
+import { cascadeRollbackIds } from '../utils/stepFlow';
 
 const route = useRoute();
 const router = useRouter();
@@ -20,18 +21,37 @@ const stepStore = useStepStore();
 
 const clockId = computed(() => String(route.params.id ?? ''));
 const clock = computed(() => clockStore.byId(clockId.value));
-const { progress, steps, done, total, percent, current, gaps } = useRepairProgress(clockId);
+const { progress, steps, done, total, percent, current, gaps, redoTotal } = useRepairProgress(clockId);
 const parts = computed(() => partStore.byClock(clockId.value));
 const tests = computed(() => stepStore.testsByClock(clockId.value));
 const activeTab = ref('steps');
 
 async function finish(id: string) {
-  await stepStore.finish(id);
-  ElMessage.success('步骤已完成');
+  try {
+    await stepStore.finish(id);
+    ElMessage.success('步骤已完成');
+  } catch (err) {
+    ElMessage.warning(err instanceof Error ? err.message : '无法完成该步骤');
+  }
 }
 async function rollback(id: string) {
-  await stepStore.rollback(id);
-  ElMessage.warning('步骤已回退');
+  const target = steps.value.find((it) => it.id === id);
+  const affected = cascadeRollbackIds(steps.value, id) ?? [];
+  if (!target || affected.length === 0) return;
+  const extra = affected.length - 1;
+  try {
+    await ElMessageBox.confirm(
+      extra > 0
+        ? `回退 #${target.seq} ${target.stepType} 后，其后续 ${extra} 条已完成记录将一并回到待重做（共 ${affected.length} 步，各记一次重做）。`
+        : `回退 #${target.seq} ${target.stepType}，该步骤将回到待重做并记一次重做。`,
+      '确认回退',
+      { confirmButtonText: '回退', cancelButtonText: '取消', type: 'warning' },
+    );
+  } catch {
+    return;
+  }
+  const count = await stepStore.rollback(id);
+  ElMessage.warning(`已回退 ${count} 步，回到待重做`);
 }
 async function move(payload: { id: string; direction: 'up' | 'down' }) {
   const list = steps.value;
@@ -103,6 +123,9 @@ onMounted(async () => {
             <div class="card-head">
               <strong>修复进度</strong>
               <el-tag size="small">{{ done }}/{{ total }} · {{ percent }}%</el-tag>
+              <el-tag v-if="redoTotal > 0" size="small" type="warning" effect="plain">
+                累计重做 {{ redoTotal }} 次
+              </el-tag>
               <span v-if="current" class="muted">
                 当前卡点：#{{ current.seq }} {{ current.stepType }}（{{ current.operator }}）
               </span>
